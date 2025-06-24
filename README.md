@@ -95,8 +95,8 @@ The SDK provides a simple gRPC interceptor that will automatically get and refre
 import { createGrpcTransport } from '@connectrpc/connect-node';
 import { createPromiseClient } from '@connectrpc/connect';
 
-const clientID = "your client id";
-const clientSecret = "your client secret";
+const clientID = "<YOUR_CLIENT_ID>";
+const clientSecret = "<YOUR_CLIENT_SECRET>";
 const scopes = ["openid", "offline", "profile", "email", "https://saltoapis.com/auth/nebula"];
 
 // Create the saltoapis auth interceptor with your user credentials
@@ -115,6 +115,216 @@ const res = await client.listOperations({ pageSize: 10 });
 ```
 
 You can find more information about authentication at [Salto Nebula API authentication](https://developer.saltosystems.com/nebula/api/authentication/).
+
+## Minimal example
+
+```ts
+import { createGrpcTransport } from '@connectrpc/connect-node';
+import { createPromiseClient } from '@connectrpc/connect';
+import { SaltoapisAuthInterceptor } from '@saltoapis/auth';
+import { UserService } from '@saltoapis/nebula-user-v1';
+
+const clientID = "<YOUR_CLIENT_ID>";
+const clientSecret = "<YOUR_CLIENT_SECRET>";
+const scopes = [
+  "openid", "offline", "profile", "email", "https://saltoapis.com/auth/nebula"
+];
+
+// Create the saltoapis auth interceptor
+const authInterceptor = SaltoapisAuthInterceptor.withClientCredentials(
+  clientID, clientSecret, scopes
+);
+
+// Create the gRPC transport
+const transport = createGrpcTransport({
+  httpVersion: '2',
+  baseUrl: "https://nebula.saltoapis.com",
+  interceptors: [authInterceptor]
+});
+
+// Create the client
+const client = createPromiseClient(UserService, transport);
+
+async function listUsers() {
+  const response = await client.listUsers({
+    parent: "<YOUR_INSTALLATION_NAME>",
+    pageSize: 10
+  });
+  for (const user of response.users) {
+    console.log(user.displayName);
+  }
+}
+
+listUsers().catch(console.error);
+```
+
+## Create, update, and delete user
+
+```ts
+import { createGrpcTransport } from '@connectrpc/connect-node';
+import { createPromiseClient } from '@connectrpc/connect';
+import { SaltoapisAuthInterceptor } from '@saltoapis/auth';
+import { UserService } from '@saltoapis/nebula-user-v1';
+import { FieldMask } from 'google-protobuf/google/protobuf/field_mask_pb';
+
+const CLIENT_ID = "<YOUR_CLIENT_ID>";
+const CLIENT_SECRET = "<YOUR_CLIENT_SECRET>";
+const INSTALLATION_NAME = "<YOUR_INSTALLATION_NAME>";
+
+const authInterceptor = SaltoapisAuthInterceptor.withClientCredentials(
+  CLIENT_ID, CLIENT_SECRET, ["https://saltoapis.com/auth/nebula"]
+);
+
+const transport = createGrpcTransport({
+  httpVersion: '2',
+  baseUrl: "https://nebula.saltoapis.com",
+  interceptors: [authInterceptor]
+});
+
+const client = createPromiseClient(UserService, transport);
+
+async function main() {
+  const email = "example@saltosystems.com";
+
+  // Create a new user
+  const created = await client.createUser({
+    parent: INSTALLATION_NAME,
+    user: {
+      givenName: "Test",
+      familyName: "User",
+      displayName: "Test User",
+      email
+    }
+  });
+
+  // List users
+  let response = await client.listUsers({ parent: INSTALLATION_NAME, pageSize: 10 });
+  console.log("Initial users after create:");
+  response.users.forEach(user => console.log(user.displayName));
+
+  // Update the user's family name
+  await client.updateUser({
+    user: {
+      name: created.user?.name,
+      familyName: "User Updated"
+    },
+    updateMask: FieldMask.fromObject({ paths: ["family_name"] })
+  });
+
+  response = await client.listUsers({ parent: INSTALLATION_NAME, pageSize: 10 });
+  console.log("\nUsers after update:");
+  response.users.forEach(user => console.log(user.displayName));
+
+  // Delete the user
+  await client.deleteUser({ name: created.user?.name });
+
+  response = await client.listUsers({ parent: INSTALLATION_NAME, pageSize: 10 });
+  console.log("\nUsers after delete:");
+  response.users.forEach(user => console.log(user.displayName));
+}
+
+main().catch(console.error);
+```
+
+## Remote unlock
+
+```ts
+import { createGrpcTransport } from '@connectrpc/connect-node';
+import { createPromiseClient } from '@connectrpc/connect';
+import { SaltoapisAuthInterceptor } from '@saltoapis/auth';
+import { ElectronicLockService } from '@saltoapis/nebula-electroniclock-v1';
+import { AccessPointService } from '@saltoapis/nebula-accesspoint-v1';
+
+const CLIENT_ID = "<YOUR_CLIENT_ID>";
+const CLIENT_SECRET = "<YOUR_CLIENT_SECRET>";
+const INSTALLATION_NAME = "<YOUR_INSTALLATION_NAME>";
+
+const authInterceptor = SaltoapisAuthInterceptor.withClientCredentials(
+  CLIENT_ID, CLIENT_SECRET, ["https://saltoapis.com/auth/nebula"]
+);
+
+const transport = createGrpcTransport({
+  httpVersion: '2',
+  baseUrl: "https://nebula.saltoapis.com",
+  interceptors: [authInterceptor]
+});
+
+const elClient = createPromiseClient(ElectronicLockService, transport);
+const apClient = createPromiseClient(AccessPointService, transport);
+
+async function remoteUnlock() {
+  // Get the first electronic lock
+  const responseEl = await elClient.listElectronicLocks({
+    parent: INSTALLATION_NAME,
+    pageSize: 1
+  });
+
+  if (!responseEl.electronicLocks?.length) {
+    console.log("No electronic locks found");
+    return;
+  }
+
+  const electronicLock = responseEl.electronicLocks[0];
+  console.log("Display name:", electronicLock.displayName);
+  console.log("Name:", electronicLock.name);
+  console.log("Electronic lock's Access Point:", electronicLock.accessPoint);
+
+  // Unlock the access point
+  await apClient.unlockAccessPoint({
+    name: electronicLock.accessPoint
+  });
+
+  console.log(`Electronic lock '${electronicLock.displayName}' opened`);
+}
+
+remoteUnlock().catch(console.error);
+```
+
+## Create and delete unit
+
+```ts
+import { createGrpcTransport } from '@connectrpc/connect-node';
+import { createPromiseClient } from '@connectrpc/connect';
+import { SaltoapisAuthInterceptor } from '@saltoapis/auth';
+import { UnitService } from '@saltoapis/nebula-unit-v1';
+
+const CLIENT_ID = "<YOUR_CLIENT_ID>";
+const CLIENT_SECRET = "<YOUR_CLIENT_SECRET>";
+const INSTALLATION_NAME = "<YOUR_INSTALLATION_NAME>";
+
+const authInterceptor = SaltoapisAuthInterceptor.withClientCredentials(
+  CLIENT_ID, CLIENT_SECRET, ["https://saltoapis.com/auth/nebula"]
+);
+
+const transport = createGrpcTransport({
+  httpVersion: '2',
+  baseUrl: "https://nebula.saltoapis.com",
+  interceptors: [authInterceptor]
+});
+
+const client = createPromiseClient(UnitService, transport);
+
+async function createAndDeleteUnit() {
+  // Create a new unit with privacy settings
+  const response = await client.createUnit({
+    parent: INSTALLATION_NAME,
+    unit: {
+      displayName: "Test Unit",
+      privacySettings: { enabled: true }
+    }
+  });
+
+  console.log(`Created unit: ${response.unit?.displayName}`);
+
+  // Delete the unit
+  await client.deleteUnit({ name: response.unit?.name });
+  console.log(`Deleted unit: ${response.unit?.displayName}`);
+}
+
+createAndDeleteUnit().catch(console.error);
+```
+
+See also the [Nebula API documentation](https://developer.saltosystems.com/nebula) for detailed information on available services and methods.
 
 ## Troubleshooting
 
