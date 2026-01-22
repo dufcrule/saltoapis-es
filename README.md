@@ -1,9 +1,15 @@
 # saltoapis-es
 
-This repository contains the source code for the ES SALTO APIs SDK.
+This repository contains the source code for the ES Salto APIs SDK.
 
 > These APIs use the connectrpc framework and the gRPC protocol.
 > Refer to the official documentation to learn more about [connectrpc](https://connectrpc.com/docs/introduction) and [gRPC](https://grpc.io/docs/).
+
+## Documentation
+
+- **[Nebula API documentation](https://developer.saltosystems.com/nebula)** - Complete API reference and conceptual guides
+- **[Authentication Guide](https://developer.saltosystems.com/nebula/api/authentication/)** - OAuth2 flows and credential setup
+- **This README** - SDK-specific installation and TypeScript/JavaScript examples
 
 ## Getting started
 
@@ -43,6 +49,34 @@ Find the package you need at [saltoapis-es NPM packages](https://github.com/salt
 ```sh
 npm install @saltoapis/<package-name>
 ```
+
+## Understanding Salto Nebula concepts
+
+Before diving into the code, familiarize yourself with these core concepts:
+
+- **Installation** - Your Salto Nebula environment (required as `parent` in most API calls)
+- **Access points** - Physical entry or exit points controlled by electronic locks
+- **Electronic locks** - Smartlocks connected to access points
+- **Users** - People who can access your installation
+- **Access rights** - Permissions linking users to access points
+- **Units** - Logical sub-grouping of access control elements within an installation (rooms, apartments, offices)
+
+**[See also the domain model guide](https://support.saltosystems.com/homelok/user-guide/property-manager/getting-started/best-practices/#entity-relationship) and [glossary](https://developer.saltosystems.com/nebula/glossary/)**.
+
+## Available services
+
+This SDK provides clients for the following core Nebula services (among others):
+
+| Service | Package | Documentation |
+| --- | --- | --- |
+| Users | `@saltoapis/nebula-user-v1` | [API Reference](https://developer.saltosystems.com/nebula/api/salto/nebula/user/v1/) |
+| Electronic locks | `@saltoapis/nebula-electroniclock-v1` | [API Reference](https://developer.saltosystems.com/nebula/api/salto/nebula/electroniclock/v1/) |
+| Access points | `@saltoapis/nebula-accesspoint-v1` | [API Reference](https://developer.saltosystems.com/nebula/api/salto/nebula/accesspoint/v1/) |
+| Access rights | `@saltoapis/nebula-accessright-v1` | [API Reference](https://developer.saltosystems.com/nebula/api/salto/nebula/accessright/v1/) |
+| Units | `@saltoapis/nebula-unit-v1` | [API Reference](https://developer.saltosystems.com/nebula/api/salto/nebula/unit/v1/) |
+| Events | `@saltoapis/nebula-event-v1` | [API Reference](https://developer.saltosystems.com/nebula/api/salto/nebula/event/v1/) |
+
+[View all available packages](https://github.com/saltoapis/saltoapis-es/packages?ecosystem=npm)
 
 ## Setup
 
@@ -115,6 +149,135 @@ const res = await client.listOperations({ pageSize: 10 });
 ```
 
 You can find more information about authentication at [Salto Nebula API authentication](https://developer.saltosystems.com/nebula/api/authentication/).
+
+## Usage examples
+
+>**Tip**: All examples require your installation ID (e.g., `installations/01GZX9G7PMV3VRMM6PJOC3SHQV`).
+
+### List users
+
+```typescript
+import { createGrpcTransport } from '@connectrpc/connect-node';
+import { createPromiseClient } from '@connectrpc/connect';
+import { UserService } from '@saltoapis/nebula-user-v1';
+import { SaltoapisAuthInterceptor } from '@saltoapis/saltoapis-auth';
+
+// Setup authentication
+const authInterceptor = SaltoapisAuthInterceptor.withClientCredentials(
+  process.env.CLIENT_ID!,
+  process.env.CLIENT_SECRET!,
+  ['openid', 'offline', 'profile', 'email', 'https://saltoapis.com/auth/nebula']
+);
+
+// Create transport
+const transport = createGrpcTransport({
+  httpVersion: '2',
+  baseUrl: 'https://nebula.saltoapis.com',
+  interceptors: [authInterceptor]
+});
+
+// Create user service client
+const userClient = createPromiseClient(UserService, transport);
+
+// List users with pagination
+const response = await userClient.listUsers({
+  parent: 'installations/your-installation-id',
+  pageSize: 50,
+  pageToken: '' // Use response.nextPageToken for subsequent pages
+});
+
+console.log(`Found ${response.users.length} users`);
+response.users.forEach(user => {
+  console.log(`- ${user.displayName} (${user.name})`);
+  if (user.validUntil) {
+    console.log(`  Valid until: ${user.validUntil}`);
+  }
+});
+
+// Iterate through all pages
+let pageToken = '';
+let allUsers = [];
+do {
+  const page = await userClient.listUsers({
+    parent: 'installations/your-installation-id',
+    pageSize: 100,
+    pageToken
+  });
+  allUsers.push(...page.users);
+  pageToken = page.nextPageToken;
+} while (pageToken);
+
+console.log(`Total users: ${allUsers.length}`);
+```
+
+### Create a user
+
+```typescript
+import { User } from '@saltoapis/nebula-user-v1';
+
+const newUser = await userClient.createUser({
+  parent: 'installations/your-installation-id',
+  userId: 'john-doe', // Optional custom ID
+  user: {
+    displayName: 'John Doe',
+    givenName: 'John',
+    familyName: 'Doe',
+    email: 'john.doe@example.com',
+    // validUntil can be set for temporary access
+    // validUntil: { seconds: BigInt(Math.floor(Date.now() / 1000) + 86400 * 30) }
+  }
+});
+
+console.log(`Created user: ${newUser.name}`);
+```
+
+### Filter users
+
+```typescript
+// List users whose access has expired
+const expiredUsers = await userClient.listUsers({
+  parent: 'installations/your-installation-id',
+  filter: `valid_until < "${new Date().toISOString()}"`,
+  pageSize: 100
+});
+
+console.log(`Found ${expiredUsers.users.length} expired users`);
+```
+
+See also the [Nebula API documentation](https://developer.saltosystems.com/nebula/api/filter/) for more information on how to use the filter.
+
+### Error handling
+
+```typescript
+import { ConnectError } from '@connectrpc/connect';
+import { Code } from '@connectrpc/connect';
+
+try {
+  await userClient.createUser({
+    parent: 'installations/your-installation-id',
+    userId: 'duplicate-user',
+    user: { displayName: 'Test User' }
+  });
+} catch (err) {
+  if (err instanceof ConnectError) {
+    switch (err.code) {
+      case Code.AlreadyExists:
+        console.error('User already exists');
+        break;
+      case Code.PermissionDenied:
+        console.error('Insufficient permissions');
+        break;
+      case Code.InvalidArgument:
+        console.error('Invalid user data:', err.message);
+        break;
+      default:
+        console.error(`gRPC error [${err.code}]: ${err.message}`);
+    }
+  } else {
+    throw err;
+  }
+}
+```
 
 ## Troubleshooting
 
